@@ -198,8 +198,10 @@ instance Measure Double [String] DocM where
 liftRender :: RenderM a -> DocM a
 liftRender act = DocM (lift (lift act))
 
+lispKeywords = map T.pack ["lambda", "λ", "cond"]
+
 prettyR :: RExpr -> DocM ()
-prettyR (RSymbol e) = text e
+prettyR (RSymbol e) = if e `elem` lispKeywords then annotate LKwd (text e) else text e
 prettyR (ProperList []) = text (T.pack "'()")
 prettyR (ProperList [RSymbol q, e]) | q == T.pack "quote" =
   text (T.pack "'") >> prettyR e
@@ -342,7 +344,7 @@ record doc parent line = do
 
 
 main :: IO ()
-main = do  
+main = do
   Just doc <- currentDocument
   Just window <- currentWindow
   Just body <- getBody doc
@@ -405,7 +407,7 @@ main = do
 
   (Just w) <- currentWindow
   on w resize $ liftIO (refreshOut *> pure ())
-    
+
 
   liftIO $ return ()
 
