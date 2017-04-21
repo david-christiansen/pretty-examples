@@ -16,6 +16,9 @@ import Control.Monad.State
 import Control.Monad.RWS
 
 import Control.Concurrent (threadDelay, forkIO)
+import Control.Concurrent.MVar (newMVar, tryTakeMVar, putMVar)
+
+import Data.Foldable (for_)
 
 import Data.Char (isSpace, isAlpha)
 import Data.List (intersperse)
@@ -40,10 +43,12 @@ import GHCJS.DOM.Types ( Document
                        , IsDocument
                        , IsNode
                        , Text
-                       , unsafeCastTo)
+                       , unsafeCastTo
+                       )
+import GHCJS.DOM.Window (alert, resize)
 --import GHCJS.DOM.WindowTimers (setTimeout)
 
-import qualified GHCJS.DOM.Element as E (click, getAttribute, keyPress, setAttribute, load, getOffsetWidth)
+import qualified GHCJS.DOM.Element as E (click, getAttribute, keyPress, setAttribute, load, getOffsetWidth, setInnerHTML)
 
 ---
 
@@ -70,7 +75,7 @@ renderAtom htmlDoc (AChunk (CText (preProcess -> t))) = do
   return elt
 renderAtom htmlDoc (AChunk (CSpace w)) = do
   elt <- createElement htmlDoc "span" HTMLElement
-  E.setAttribute elt "style" ("display: inline-block; min-width: " ++ show (round (w * spaceWidth)) ++ "px;")
+  E.setAttribute elt "style" ("display: inline-block; min-width: " ++ show (round w) ++ "px;")
   return elt
 
 
@@ -144,9 +149,6 @@ askParent = RenderM (pure . snd)
 chunkWidths :: IORef (M.Map (Chunk Double, [String]) Double)
 chunkWidths = unsafePerformIO (newIORef M.empty) -- TODO: move into RenderM state
 
-spaceWidth :: Double
-spaceWidth = 4
-
 measureChunk :: (Chunk Double, [String]) -> RenderM Double
 measureChunk ch@(CText (preProcess -> txt), fmt) = do
   found <- M.lookup ch <$> liftIO (readIORef chunkWidths)
@@ -167,7 +169,7 @@ measureChunk ch@(CText (preProcess -> txt), fmt) = do
       removeChild parent (Just elt)
 
       liftIO $ atomicModifyIORef' chunkWidths $ \ old -> (M.insert ch w old, ())
-      return (w / spaceWidth) -- HACK ALERT - in the future, actually measure spaces
+      return w
 measureChunk (CSpace w, _)  = pure w
 
 newtype DocM a = DocM { unDocM :: RWST (PEnv Double LispAnn [String])
@@ -340,7 +342,7 @@ record doc parent line = do
 
 
 main :: IO ()
-main = do
+main = do  
   Just doc <- currentDocument
   Just window <- currentWindow
   Just body <- getBody doc
@@ -350,43 +352,47 @@ main = do
   button     <- createElement doc "input" HTMLInputElement
   setType button "button"
 
+  outputRecord <- newIORef [] :: IO (IORef [DocM ()])
+
   appendChild body (Just transcript)
-  threadDelay 1
   appendChild body (Just input)
-  threadDelay 1
   appendChild body (Just button)
   threadDelay 1
 
-  forkIO $ do
-    threadDelay 1
-    putStrLn "hello"
-    out <- E.getOffsetWidth transcript :: IO (Double)
-    putStrLn (show out)
+  renderLock <- newMVar ()
 
-    let terpri = (createElement doc "br" HTMLBRElement >>= appendChild transcript . Just) >>
-                 pure ()
+  let refreshOut = forkIO $ do
+        ok <- tryTakeMVar renderLock
+        case ok of
+          Just () -> do
+            E.setInnerHTML transcript (Just "")
+            out <- reverse <$> readIORef outputRecord
+            for_ out $ \ d -> do
+              o <- execDoc doc transcript d
+              render doc transcript (const "") o
+              threadDelay 1 -- render a browser frame
+              br <- createElement doc "br" HTMLBRElement
+              appendChild transcript (Just br)
+              putMVar renderLock ()
+          Nothing -> pure ()
 
-    o1 <- liftIO $ execDoc doc transcript d1
-    liftIO $ render doc transcript (const "") o1
-    terpri
-    o2 <- liftIO $ execDoc doc transcript d2
-    liftIO $ render doc transcript (const "") o2
-    terpri
-    -- o3 <- execDoc doc transcript d3
-    -- render doc transcript (const "") o3
-    -- terpri
-    -- o4 <- execDoc doc transcript d4
-    -- render doc transcript (const "") o4
-    -- terpri
-    o5 <- execDoc doc transcript d5
-    render doc transcript (const "") o5
-    terpri
-    return ()
+  let addOut e = forkIO $
+        atomicModifyIORef' outputRecord (\ old -> (prettyR (toR e) : old, ()))
 
 
   let save line =
-        (record doc transcript line >>
-         setValue input (Just "")) :: EventM e t ()
+       case parse (phrase readExpr) line of
+         Left err -> liftIO $ do
+           w <- currentWindow
+           case w of
+             Just win -> liftIO $ alert win err
+             Nothing -> liftIO $ putStrLn err
+         Right (_, e) ->
+           liftIO $ do
+             addOut e
+             refreshOut
+             setValue input (Just "")
+             return ()
 
   let userInput = getValueUnsafe input :: EventM e t String
 
@@ -396,6 +402,10 @@ main = do
     if wh == 13
       then (userInput >>= save)
       else return ()
+
+  (Just w) <- currentWindow
+  on w resize $ liftIO (refreshOut *> pure ())
+    
 
   liftIO $ return ()
 
