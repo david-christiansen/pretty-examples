@@ -25,6 +25,7 @@ executable jsrepl
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -Wall
+  other-modules:       Lisp
   build-depends:       base
                      , ghcjs-base
                      , jsrepl
