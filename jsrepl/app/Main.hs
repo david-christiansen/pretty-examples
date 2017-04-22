@@ -2,6 +2,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -20,7 +21,7 @@ import Control.Concurrent.MVar (newMVar, tryTakeMVar, putMVar)
 
 import Data.Foldable (for_)
 
-import Data.Char (isSpace, isAlpha)
+import Data.Char (isSpace, isAlpha, isDigit)
 import Data.List (intersperse)
 
 import qualified Data.Map.Strict as M
@@ -61,7 +62,7 @@ import Pretty
 ----------------
 
 -----------------------------------
--- Widths in HTML-land will be ints representing pixels
+-- Widths in HTML-land will be doubles representing pixels
 
 preProcess :: T.Text -> T.Text
 preProcess = T.replace (T.pack " ") (T.pack " ") -- it's a non breaking space char
@@ -75,7 +76,12 @@ renderAtom htmlDoc (AChunk (CText (preProcess -> t))) = do
   return elt
 renderAtom htmlDoc (AChunk (CSpace w)) = do
   elt <- createElement htmlDoc "span" HTMLElement
-  E.setAttribute elt "style" ("display: inline-block; min-width: " ++ show (round w) ++ "px;")
+  E.setAttribute elt "style" $
+    "display: inline-block;" ++
+    "min-width: " ++ show (round w) ++ "px;" ++
+    "max-width: " ++ show (round w) ++ "px;"
+  txt <- createTextNodeUnsafe' htmlDoc " "
+  appendChild elt (Just txt)
   return elt
 
 
@@ -89,17 +95,18 @@ render htmlDoc parent toClass out = go out >> return ()
         PSeq a b -> go a >> go b
         PAnn a o -> do
           elt <- createElement htmlDoc "span" HTMLElement :: IO HTMLElement
-          E.setAttribute elt "className" (toClass a)
+          E.setAttribute elt "class" (toClass a)
           render htmlDoc (elt :: HTMLElement) toClass o
           appendChild parent (Just elt)
 
 --------------------
 
-data Expr = Symbol T.Text | Nil | Cons Expr Expr
+data Expr = Symbol T.Text | Nil | Cons Expr Expr | Num Integer
 
-data RExpr = RSymbol T.Text | ProperList [RExpr] | ImproperList [RExpr]
+data RExpr = RSymbol T.Text | RNum Integer | ProperList [RExpr] | ImproperList [RExpr]
 
 toR (Symbol s) = RSymbol s
+toR (Num i) = RNum i
 toR Nil = ProperList []
 toR (Cons e1 e2) =
   case toR e2 of
@@ -118,7 +125,8 @@ e5 = let go n = foldr Cons Nil (replicate n (Symbol (T.pack (show n))))
 
 ----------------------
 
-data LispAnn = LSym | LKwd deriving (Eq, Ord, Show)
+data LispAnn = LSym | LKwd | LExpr | LOpen | LClose
+  deriving (Eq, Ord, Show)
 
 newtype RenderM a = RenderM { runRender :: (Document, HTMLElement) -> IO a }
   deriving (Functor)
@@ -200,25 +208,48 @@ liftRender act = DocM (lift (lift act))
 
 lispKeywords = map T.pack ["lambda", "λ", "cond"]
 
-prettyR :: RExpr -> DocM ()
+open, close :: MonadPretty w LispAnn fmt m => m ()
+open = annotate LOpen (text (T.pack "("))
+close = annotate LClose (text (T.pack ")"))
+
+parens :: MonadPretty w LispAnn fmt m => m a -> m a
+parens l = grouped $ annotate LExpr $ do
+  open
+  x <- l
+  close
+  return x
+
+prettyR :: MonadPretty w LispAnn fmt m => RExpr -> m ()
 prettyR (RSymbol e) = if e `elem` lispKeywords then annotate LKwd (text e) else text e
-prettyR (ProperList []) = text (T.pack "'()")
+prettyR (RNum u) = text (T.pack (show u))
+prettyR (ProperList []) = annotate LExpr $ text (T.pack "'") >> parens (return ())
 prettyR (ProperList [RSymbol q, e]) | q == T.pack "quote" =
   text (T.pack "'") >> prettyR e
-prettyR (ProperList [x]) = do
-  text (T.pack "(")
-  prettyR x
-  text (T.pack ")")
-prettyR (ProperList (x:xs)) = do
-  text (T.pack "(")
+prettyR (ProperList (RSymbol cond : branches)) | cond == T.pack "cond" =
+  parens $ do
+    i <- spaceWidth
+    nest (2 * i) $ do
+      prettyR (RSymbol cond)
+      ifFlat (space i) newline
+      grouped $ hvsep (map prettyR branches)
+prettyR (ProperList (RSymbol lambda : ProperList args : body))
+  | lambda `elem` map T.pack ["lambda", "λ"] =
+  parens $ do
+    i <- spaceWidth
+    nest (2 * i) $ do
+      prettyR (RSymbol lambda)
+      space i
+      parens $ hvsep (map prettyR args)
+      ifFlat (space i) newline
+      grouped $ hvsep (map prettyR body)
+prettyR (ProperList [x]) = parens $ prettyR x
+prettyR (ProperList (x:xs)) = parens $ do
   align $ do prettyR x
-             space 1
+             i <- spaceWidth
+             space i
              hvsep (map prettyR xs)
---  hvsep $ align (prettyR x) : (map prettyR xs)
-  text (T.pack ")")
 prettyR (ImproperList xs) =
-  collection (text (T.pack "(")) (text (T.pack ")")) (return ())
-    (withDot (map prettyR xs))
+  parens $ hvsep (map prettyR xs)
   where withDot [] = []
         withDot [x] = [x]
         withDot [x, y] = [x, char '.', y]
@@ -260,11 +291,17 @@ token p = Parse $ \s ->
     Left err -> Left err
     Right (rest, res) -> Right (dropWhile isSpace rest, res)
 
+isExtendedAlpha c = isAlpha c || c `elem` extra
+  where extra = [ '+', '-', '.', '*', '/', '<', '=', '>', '!', '?', ':'
+                , '$', '%', '_', '&', '~', '^'
+                ]
+
 readSym :: Parse Expr
 readSym = Parse $ \ txt ->
-  case takeWhile isAlpha txt of
+  case takeWhile isExtendedAlpha txt of
+    ok@(c:cs) | (not (c `elem` "+-#.") || cs == []) ->
+      Right (drop (length ok) txt, Symbol (T.pack ok))
     [] -> Left $ "Not a symbol at " ++ take 20 txt
-    ok@(c:cs) -> Right (drop (length ok) txt, Symbol (T.pack ok))
 
 readQuoted = Parse $ \ txt ->
   case txt of
@@ -283,6 +320,16 @@ readChar c = Parse $ \txt ->
         then Right (xs, ())
         else Left $ "Expected " ++ show c ++ " got " ++ show x
 
+nat :: Parse Integer
+nat = Parse $ \txt ->
+  case takeWhile isDigit txt of
+    [] -> Left $ "Expected integer at " ++ show (take 10 txt)
+    num@(_:_) ->
+      Right (drop (length num) txt, read num)
+
+int :: Parse Expr
+int = Num <$> (((* (-1)) <$> (readChar '-' *> nat)) <|> nat)
+
 list :: Parse Expr
 list = foldr Cons Nil <$>
          (token (readChar '(') *>
@@ -297,7 +344,7 @@ phrase p = Parse $ \ txt ->
     Right (xs, x) -> Left $ "Expected to consume all input, but left over: " ++
                             show (take 15 xs)
 
-readExpr = token readSym <|> readQuoted <|> list
+readExpr = token int <|> token readSym <|> readQuoted <|> list
 
 --------------------
 state0 :: PState Double [String]
@@ -353,6 +400,12 @@ main = do
   input      <- createElement doc "input" HTMLInputElement
   button     <- createElement doc "input" HTMLInputElement
   setType button "button"
+  setValue button (Just "Go")
+
+  -- examples <- createElement doc "select" HTMLElement
+  -- for_ [e1, e2, e3, e4, e5] $ \e ->
+  --   opt <- createElement doc "option" HTMLElement
+    
 
   outputRecord <- newIORef [] :: IO (IORef [DocM ()])
 
@@ -371,11 +424,11 @@ main = do
             out <- reverse <$> readIORef outputRecord
             for_ out $ \ d -> do
               o <- execDoc doc transcript d
-              render doc transcript (const "") o
+              render doc transcript show o
               threadDelay 1 -- render a browser frame
               br <- createElement doc "br" HTMLBRElement
               appendChild transcript (Just br)
-              putMVar renderLock ()
+            putMVar renderLock ()
           Nothing -> pure ()
 
   let addOut e = forkIO $
