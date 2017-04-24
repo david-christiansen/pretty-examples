@@ -58,7 +58,7 @@ import qualified Data.Text as T
 
 import Lisp
 
-import Pretty
+import Text.PrettyPrint.Final
 
 
 ----------------
@@ -229,7 +229,7 @@ prettyR (ProperList [x]) = parens $ prettyR x
 prettyR (ProperList (x:xs)) = parens $ do
   align $ do prettyR x
              i <- spaceWidth
-             space i
+             ifFlat (space i) newline
              hvsep (map prettyR xs)
 prettyR (ImproperList xs) =
   parens $ hvsep (map prettyR xs)
