@@ -219,7 +219,7 @@ jsREPL config = do
   setType button "button"
   setValue button (Just "Go")
 
-  outputRecord <- newIORef [] :: IO (IORef [pretty ()])
+  outputRecord <- newIORef [] :: IO (IORef [DocM ann ()])
 
   appendChild body (Just transcript)
   appendChild body (Just input)
@@ -237,7 +237,6 @@ jsREPL config = do
             for_ out $ \ d -> do
               o <- execDoc doc transcript d
               render doc transcript (showAnn config) o
-              threadDelay 1 -- render a browser frame
               br <- createElement doc "br" HTMLBRElement
               appendChild transcript (Just br)
             putMVar renderLock ()
