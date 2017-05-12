@@ -9,6 +9,7 @@
 module Lib ( DocM(..)
            , REPLConfig(..)
            , jsREPL
+           , jsFile
            ) where
 
 import Data.IORef (IORef(..), newIORef, readIORef, atomicModifyIORef')
@@ -33,10 +34,15 @@ import System.IO.Unsafe (unsafePerformIO) -- yolo
 
 import GHCJS.DOM (currentDocument, currentWindow)
 import GHCJS.DOM.Document (createElementUnsafe, createTextNodeUnsafe, getBody)
-import GHCJS.DOM.EventM (EventM, event, on, uiWhich)
-import GHCJS.DOM.HTMLInputElement (getValueUnsafe, setValue, setType)
+import GHCJS.DOM.EventM (EventM, event, on, target, uiWhich)
+import GHCJS.DOM.File
+import GHCJS.DOM.FileList
+import GHCJS.DOM.FileReader
+import GHCJS.DOM.HTMLInputElement (getFilesUnsafe, getValueUnsafe, setValue, setType)
 import GHCJS.DOM.Node (appendChild, removeChild)
 import GHCJS.DOM.Types ( Document
+                       , FileList(..)
+                       , FromJSVal(..)
                        , HTMLElement(..)
                        , HTMLInputElement(..)
                        , HTMLDivElement(..)
@@ -50,7 +56,7 @@ import GHCJS.DOM.Types ( Document
 import GHCJS.DOM.Window (alert, resize)
 --import GHCJS.DOM.WindowTimers (setTimeout)
 
-import qualified GHCJS.DOM.Element as E (click, getAttribute, keyPress, setAttribute, load, getOffsetWidth, setInnerHTML)
+import qualified GHCJS.DOM.Element as E (change, click, getAttribute, keyPress, setAttribute, load, getOffsetWidth, setInnerHTML)
 
 import Text.PrettyPrint.Final
 
@@ -269,6 +275,84 @@ jsREPL config = do
       then (userInput >>= save)
       else return ()
 
+  (Just w) <- currentWindow
+  on w resize $ liftIO (refreshOut *> pure ())
+
+
+  liftIO $ return ()
+
+
+jsFile :: REPLConfig ann -> IO ()
+jsFile config = do
+  Just doc    <- currentDocument
+  Just window <- currentWindow
+  Just body   <- getBody doc
+
+  transcript <- createElement doc "div" HTMLElement
+  file       <- createElement doc "input" HTMLInputElement
+
+  setType file "file"
+
+  outputRecord <- newIORef [] :: IO (IORef [DocM ann ()])
+
+  appendChild body (Just transcript)
+  appendChild body (Just file)
+  threadDelay 1
+
+  renderLock <- newMVar ()
+
+  let refreshOut = forkIO $ do
+        ok <- tryTakeMVar renderLock
+        case ok of
+          Just () -> do
+            E.setInnerHTML transcript (Just "")
+            out <- reverse <$> readIORef outputRecord
+            for_ out $ \ d -> do
+              o <- execDoc doc transcript d
+              render doc transcript (showAnn config) o
+              br <- createElement doc "br" HTMLBRElement
+              appendChild transcript (Just br)
+            putMVar renderLock ()
+          Nothing -> pure ()
+
+  let addOut doc = forkIO $
+        atomicModifyIORef' outputRecord (\ old -> (doc : old, ()))
+
+
+  let save line =
+        case handleInput config line of
+          Left err -> liftIO $ do
+            w <- currentWindow
+            case w of
+              Just win -> liftIO $ alert win err
+              Nothing -> liftIO $ putStrLn err
+          Right doc ->
+            liftIO $ do
+              addOut doc
+              refreshOut
+              return ()
+
+  let userInput = getValueUnsafe file :: EventM e t String
+
+  on file E.change $ do
+    liftIO $ putStrLn "file"
+    fileList <- getFilesUnsafe file
+    len <- liftIO $ getLength fileList
+    if (len < 1)
+      then liftIO $ putStrLn "No file"
+      else do
+        Just theFile <- item fileList 0
+        (getName theFile) >>= (liftIO . putStrLn)
+        reader <- newFileReader
+        liftIO $ on reader loadEnd $ do
+          Just tgt <- target
+          res <- getResult tgt
+          Just str <- liftIO $ fromJSVal res
+          liftIO $ putStrLn str
+          return ()
+        readAsText reader (Just theFile) "UTF-8"
+
+  
   (Just w) <- currentWindow
   on w resize $ liftIO (refreshOut *> pure ())
 
