@@ -50,6 +50,7 @@ executable ppupload
   other-modules:       Lisp
   build-depends:       base
                      , ghcjs-base
+                     , haskell-src-exts == 1.17.1
                      , jsrepl
                      , mtl
                      , ghcjs-dom == 0.7.0.4

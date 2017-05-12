@@ -293,7 +293,7 @@ jsFile config = do
 
   setType file "file"
 
-  outputRecord <- newIORef [] :: IO (IORef [DocM ann ()])
+  outputRecord <- newIORef (pure ()) :: IO (IORef (DocM ann ()))
 
   appendChild body (Just transcript)
   appendChild body (Just file)
@@ -306,17 +306,16 @@ jsFile config = do
         case ok of
           Just () -> do
             E.setInnerHTML transcript (Just "")
-            out <- reverse <$> readIORef outputRecord
-            for_ out $ \ d -> do
-              o <- execDoc doc transcript d
-              render doc transcript (showAnn config) o
-              br <- createElement doc "br" HTMLBRElement
-              appendChild transcript (Just br)
+            out <- readIORef outputRecord
+            o <- execDoc doc transcript out
+            render doc transcript (showAnn config) o
+            br <- createElement doc "br" HTMLBRElement
+            appendChild transcript (Just br)
             putMVar renderLock ()
           Nothing -> pure ()
 
-  let addOut doc = forkIO $
-        atomicModifyIORef' outputRecord (\ old -> (doc : old, ()))
+  let replaceOut doc = forkIO $
+        atomicModifyIORef' outputRecord (\ old -> (doc, ()))
 
 
   let save line =
@@ -328,7 +327,7 @@ jsFile config = do
               Nothing -> liftIO $ putStrLn err
           Right doc ->
             liftIO $ do
-              addOut doc
+              replaceOut doc
               refreshOut
               return ()
 
@@ -349,6 +348,7 @@ jsFile config = do
           res <- getResult tgt
           Just str <- liftIO $ fromJSVal res
           liftIO $ putStrLn str
+          save str
           return ()
         readAsText reader (Just theFile) "UTF-8"
 

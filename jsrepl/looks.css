@@ -16,3 +16,33 @@ body {
 span.LKwd {
     font-weight: bold;
 }
+
+.HKeyword {
+    font-weight: bold;
+}
+
+.HModuleName {
+    font-style: italic;
+}
+
+.HTyCon {
+    color: darkblue;
+}
+
+.HTyVar {
+    font-style: italic;
+    color: purple;
+}
+
+.HCon {
+    color: darkred;
+}
+
+.HVar {
+    font-style: italic;
+}
+
+.TODO {
+    color: red;
+    font-family: monospace;
+}

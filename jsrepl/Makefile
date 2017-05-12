@@ -4,13 +4,13 @@ OUTPUT_PATH2=$(shell stack path --local-install-root)/bin/ppupload.jsexe
 
 
 build:
+	stack build
 	mkdir -p "$(OUTPUT_PATH1)"
 	ln -nf "$(PWD)/index.html" "$(OUTPUT_PATH1)/index.html"
 	ln -nf "$(PWD)/looks.css" "$(OUTPUT_PATH1)/looks.css"
 	mkdir -p "$(OUTPUT_PATH2)"
 	ln -nf "$(PWD)/index.html" "$(OUTPUT_PATH2)/index.html"
 	ln -nf "$(PWD)/looks.css" "$(OUTPUT_PATH2)/looks.css"
-	stack build
 	echo Open $(OUTPUT_PATH1)/index.html to see the file
 	echo Open $(OUTPUT_PATH2)/index.html to see the file
 
