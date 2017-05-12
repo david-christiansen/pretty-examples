@@ -93,6 +93,7 @@ parens p = grouped $ do
 processName "->" = "→"
 processName "<-" = "←"
 processName ">>=" = "≫="
+processName ">>" = "≫"
 processName "=<<" = "=≪"
 processName "++" = "⧺"
 processName "." = "∘"
@@ -224,24 +225,26 @@ instance PP DataOrNew where
 instance PP Decl where
   pp (TypeSig loc ns ty) = do
     i <- spaceWidth
-    collection (return ()) (return ()) (text ",") (map pp ns)
+    collection (return ()) (return ()) (text ",") (map (annotate HVar . pp) ns)
     space i
     kwd "::"
     space i
     pp ty
   pp (DataDecl loc dataOrNew ctx n tyvars ctors derives) = do
+    em <- emWidth
+    i <- spaceWidth
     grouped $ hvsep $
       [pp dataOrNew] ++
       (if isEmpty ctx then [] else map pp ctx ++ [kwd "=>"]) ++
-      [annotate HCon $ pp n] ++
-      map pp tyvars ++
-      [kwd "="]
-    collection (return ()) (return ()) (kwd "|") (map pp ctors)
+      [annotate HTyCon $ pp n] ++
+      map (annotate HTyVar . pp) tyvars
+    align $ collection (kwd "=") (return ()) (kwd "|") (map pp ctors)
     if isEmpty derives
       then pure ()
-      else do
+      else nest (2 * em) $ do
         newline
         kwd "deriving"
+        space i
         collection (text "(") (text ")") (text ",") (map ppDerive derives)
   pp (PatBind loc pat rhs bnds) = do
     em <- emWidth
@@ -255,12 +258,86 @@ instance PP Decl where
         kwd "where" >> newline
         pp wheres
   pp (FunBind xs) = vsep (map pp xs)
+  pp (TypeDecl loc name args rhs) =
+    hsep [ kwd "type"
+         , pp name
+         , grouped $ hvsep (map pp args)
+         , kwd "="
+         , pp rhs
+         ]
+  pp (InstDecl loc overlap tyvars ctx n args body) = do
+    em <- emWidth
+    hsep $ [kwd "instance"] ++
+           over ++
+           [grouped $ hvsep (map pp tyvars)] ++
+           (if isEmpty ctx
+              then []
+              else [hsep [hsep (map pp ctx), kwd "=>"]]) ++
+           [ pp n
+           , hsep (map pp args)
+           , kwd "where"
+           ]
+    nest (2 * em) $ do
+      newline
+      vsep (map pp body)
+      where over =
+              case overlap of
+                Nothing -> []
+                Just Overlap -> [text "{-# OVERLAPPING #-}"]
+                Just NoOverlap -> [text "{-# NO_OVERLAP #-}"]
+                Just Incoherent -> [text "{-# INCOHERENT #-}"]
+  pp (ClassDecl loc ctx n args fundeps body) = do
+    em <- emWidth
+    i <- spaceWidth
+    kwd "class"
+    space i
+    if isEmpty ctx
+      then return ()
+      else
+        align $
+          collection (kwd "(") (kwd ")" >> space i >> kwd "=>") (kwd ",") $
+          map pp ctx
+
+    pp n
+    space i
+    align $ grouped $ hvsep $ map pp args
+    align $ grouped $ hvsep $ map pp fundeps
+
+    if isEmpty fundeps then return () else space i
+    kwd "where"
+    nest (2 * em) $ do
+      newline
+      vsep (map pp body)
   pp d = todo d
+
+instance PP FunDep where
+  pp (FunDep ls rs) = do
+    hsep [ kwd "|"
+         , align $ grouped $ hvsep [ hsep $ (map pp ls) ++ [kwd "->"]
+                                   , hsep (map pp rs)
+                                   ]
+         ]
+
+instance PP ClassDecl where
+  pp (ClsDecl d) = pp d
+  pp x = todo x
+
+instance PP InstDecl where
+  pp (InsDecl d) = pp d
+  pp (InsType loc t1 t2) =
+    grouped $
+    hvsep [ hsep [ kwd "type"
+                 , pp t1
+                 , kwd "="
+                 ]
+          , align $ pp t2
+          ]
+  pp x = todo x
 
 instance PP Match where
   pp (Match loc n pats ty rhs bnds) = do
     em <- emWidth
-    hsep [ grouped $ hvsep $ [pp n] ++ map pp pats
+    hsep [ grouped $ hvsep $ [annotate HVar $ pp n] ++ map pp pats
          , kwd "="
          , pp rhs]
     for_ bnds $ \wheres -> do
@@ -392,14 +469,18 @@ instance PP Pat where
     grouped $ hvsep [pp p, nest (2 * i) $ pp t]
   pp x = todo x
 
-perhapsBraces docs =
-  ifFlat (collection (text "{") (text "}") (text ";") docs) (align (vsep docs))
+perhapsBraces docs = do
+  em <- emWidth
+  ifFlat (collection (text "{") (text "}") (text ";") docs)
+         (align (vsep docs))
 
 instance PP Exp where
   pp (Var n) = annotate HVar $ pp n
   pp (Con n) = annotate HCon $ pp n
   pp (Lit l) = pp l
-  pp (InfixApp e1 op e2) = grouped $ align $ hvsep [hsep [pp e1, pp op], pp e2]
+  pp (InfixApp e1 op e2) = do
+    em <- emWidth
+    grouped $ align $ nest em $ hvsep [hsep [pp e1, pp op], pp e2]
   pp (App e1 e2) = do
     i <- spaceWidth
     grouped $ nest i $ hvsep [pp e1, pp e2]
@@ -425,12 +506,15 @@ instance PP Exp where
   pp (MultiIf alts) = do
     hsep [kwd "if", align $ vsep $ map pp alts]
   pp (Case e alts) = do
-    hsep [ kwd "case"
-         , pp e
-         , kwd "of"
-         ]
-    newline
-    perhapsBraces (map pp alts)
+    em <- emWidth
+    i <- spaceWidth
+    nest em $ grouped $ do
+      hsep [ kwd "case"
+           , pp e
+           , kwd "of"
+           ]
+      ifFlat (space i) newline
+      perhapsBraces (map (\a -> pp a) alts)
   pp (Do stmts) = do
     hsep [ kwd "do"
          , perhapsBraces (map pp stmts)
@@ -520,8 +604,10 @@ instance PP Type where
     case ctx of
       [] -> pure ()
       _  -> do
-        collection (text "(") (text ")") (text ",") (map pp ctx)
-        kwd "=>"
+        hsep [ align $ grouped $ hvsep (map pp ctx)
+             , kwd "=>"
+             , return () -- to get another space
+             ]
     pp ty
   pp (TyParen t) = parens (pp t)
   pp (TyFun t1 t2) = grouped $
@@ -537,6 +623,17 @@ instance PP Type where
   pp (TyVar n) = annotate HTyVar $ pp n
   pp (TyApp t1 t2) =
     hsep [pp t1, pp t2]
+  pp (TyTuple Boxed ts) =
+    collection (annotate HTyCon $ text "(")
+               (annotate HTyCon $ text ")")
+               (annotate HTyCon $ text ",")
+               (map pp ts)
+  pp (TyTuple Unboxed ts) =
+    collection (annotate HTyCon $ text "(#")
+               (annotate HTyCon $ text "#)")
+               (annotate HTyCon $ text ",")
+               (map pp ts)
+
   pp t = todo t
 
 config :: REPLConfig HsAnn

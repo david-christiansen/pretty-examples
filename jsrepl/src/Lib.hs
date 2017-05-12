@@ -141,7 +141,7 @@ measureChunk ch@(CText (preProcess -> txt), fmt) = do
       elt <- createElement doc "span" HTMLElement
       txtNode <- createTextNodeUnsafe' doc (T.unpack txt)
       appendChild elt (Just txtNode)
-      E.setAttribute elt "className" (concat (intersperse " " fmt))
+      E.setAttribute elt "class" (concat (intersperse " " fmt))
       E.setAttribute elt "display" "hidden"
       appendChild parent (Just elt)
       liftIO $ threadDelay 1
@@ -158,22 +158,22 @@ state0 = PState
   { curLine = []
   }
 
-env0 :: Monoid fmt => Double ->  PEnv Double a fmt
-env0 w = PEnv
+env0 :: Monoid fmt => Double -> (a -> fmt) -> PEnv Double a fmt
+env0 w fmtAnn = PEnv
   { maxWidth = w
   , maxRibbon = (w * 4) / 5
   , layout = Break
   , failure = CantFail
   , nesting = 0
   , formatting = mempty
-  , formatAnn = const mempty
+  , formatAnn = fmtAnn
   }
 
 
-execDoc :: (MonadIO m) => Document -> HTMLElement -> DocM ann () -> m (POut Double ann)
-execDoc htmlDoc parent d = do
+execDoc :: (MonadIO m) => Document -> HTMLElement -> (ann -> [String]) -> DocM ann () -> m (POut Double ann)
+execDoc htmlDoc parent fmtAnn d = do
   parentWidth <- E.getOffsetWidth parent
-  foo <- liftIO $ runRender (runDocM (env0 parentWidth) state0 d) (htmlDoc, parent)
+  foo <- liftIO $ runRender (runDocM (env0 parentWidth fmtAnn) state0 d) (htmlDoc, parent)
   case foo of
     Nothing -> pure $ PAtom $ AChunk $ CText $ T.pack "<internal pretty printing error>"
     Just (_, o, ()) -> pure o
@@ -241,7 +241,7 @@ jsREPL config = do
             E.setInnerHTML transcript (Just "")
             out <- reverse <$> readIORef outputRecord
             for_ out $ \ d -> do
-              o <- execDoc doc transcript d
+              o <- execDoc doc transcript (pure . showAnn config) d
               render doc transcript (showAnn config) o
               br <- createElement doc "br" HTMLBRElement
               appendChild transcript (Just br)
@@ -307,7 +307,7 @@ jsFile config = do
           Just () -> do
             E.setInnerHTML transcript (Just "")
             out <- readIORef outputRecord
-            o <- execDoc doc transcript out
+            o <- execDoc doc transcript (pure . showAnn config) out
             render doc transcript (showAnn config) o
             br <- createElement doc "br" HTMLBRElement
             appendChild transcript (Just br)

@@ -42,6 +42,10 @@ span.LKwd {
     font-style: italic;
 }
 
+.HKind {
+    color: darkgreen;
+}
+
 .TODO {
     color: red;
     font-family: monospace;
