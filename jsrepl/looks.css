@@ -1,4 +1,33 @@
+@font-face {
+    font-family: 'LinuxLibertineRegular';
+    src: url('fonts/LinuxLib/LinLibertine_Re-4.1_.8_.eot');
+    src: local('Linux Libertine Regular'), local('LinLibertine');
+    // src: url('fonts/LinLibertine_R.woff') format('woff');
+    src: url('fonts/LinuxLib/LinLibertine_Re-4.1_.8_.ttf') format('truetype');
+}
+
+@font-face {
+    font-family: 'LinuxLibertineItalic';
+    src: url('fonts/LinuxLib/LinLibertine_It-4.0_.3_.eot');
+    src: url('http://linuxlibertine.sourceforge.net/fonts/LinLibertine_R.woff') format('woff');
+    src: local('Linux Libertine Italic'), local('LinLibertineI');
+    src: url('fonts/LinuxLib/LinLibertine_It-4.0_.3_.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'LinuxLibertineBold';
+    src: url('fonts/LinuxLib/LinLibertine_Bd-4.0_.2_.eot');
+    src: local('Linux Libertine Bold'), local('LinLibertineB');
+    src: url('fonts/LinuxLib/LinLibertine_Bd-4.0_.2_.ttf') format('truetype');
+}
+@font-face {
+    font-family: 'LinuxLibertineSC';
+    src: url('http://linuxlibertine.sourceforge.net/fonts/LinLibertine_aS.woff');
+    src: url('fonts/LinuxLib/LinLibertine_aS.otf') format('opentype');
+}
+
+
 body {
+    font-family: "Linux Libertine";
     /* background-color: black; */
     /* color: green; */
 }
@@ -23,6 +52,7 @@ span.LKwd {
 
 .HModuleName {
     font-style: italic;
+    font-family: "Linux Libertine";
 }
 
 .HTyCon {
@@ -44,6 +74,12 @@ span.LKwd {
 
 .HKind {
     color: darkgreen;
+}
+
+.HPragma {
+    color: gray;
+    font-style: italic;
+    font-family: "Inconsolata", monospace;
 }
 
 .TODO {
