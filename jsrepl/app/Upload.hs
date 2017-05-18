@@ -124,7 +124,7 @@ instance PP Name where
   pp (Symbol str) = text (T.pack (processName str))
 
 instance PP ModulePragma where
-  pp (LanguagePragma loc ns) = do
+  pp (LanguagePragma loc ns) = annotate HPragma $ do
     i <- spaceWidth
     text "{-# LANGUAGE"
     space i
@@ -132,8 +132,7 @@ instance PP ModulePragma where
     space i
     text "#-}"
     newline
-  pp (OptionsPragma loc tool str) = text "TODO" >> newline
-  pp (AnnModulePragma loc ann) = text "TODO" >> newline
+  pp x = todo x
 
 dot = text "."
 
@@ -200,6 +199,26 @@ isEmpty :: [a] -> Bool
 isEmpty [] = True
 isEmpty _  = False
 
+declName :: Decl -> Maybe Name
+declName (TypeDecl _ n _ _) = pure n
+declName (DataDecl _ _ _ n _ _ _) = pure n
+declName (TypeSig _ [n] _) = pure n
+declName (FunBind (Match _ n _ _ _ _ : ms)) = pure n
+declName (PatBind _ p _ _) = name p
+  where name (PVar n) = pure n
+        name (PApp _ (p:ps)) = name p
+        name (PParen p) = name p
+        name _ = empty
+declName _ = empty
+
+splitDecls [] = []
+splitDecls (x : xs) =
+  case declName x of
+    Nothing -> [x] : splitDecls xs
+    Just n ->
+      let (same, diff) = span ((== Just n) . declName) xs
+      in (x : same) : splitDecls diff
+
 instance PP Module where
   pp (Module loc name pragmas warnings exports imports decls) = do
     traverse_ pp pragmas
@@ -211,7 +230,7 @@ instance PP Module where
     newline
     for_ imports $ \i -> do pp i ; newline
     newline
-    for_ decls $ \d -> do pp d ; newline ; newline
+    vsep $ map (>> newline) $ map (vsep . map pp) (splitDecls decls)
    where exportDoc =
            case exports of
              Nothing -> pure ()
@@ -229,7 +248,7 @@ instance PP Decl where
     space i
     kwd "::"
     space i
-    pp ty
+    align $ grouped $ pp ty
   pp (DataDecl loc dataOrNew ctx n tyvars ctors derives) = do
     em <- emWidth
     i <- spaceWidth
@@ -248,10 +267,9 @@ instance PP Decl where
         collection (text "(") (text ")") (text ",") (map ppDerive derives)
   pp (PatBind loc pat rhs bnds) = do
     em <- emWidth
-    hsep [ pp pat
-         , kwd "="
-         , nest (2 * em) $ pp rhs
-         ]
+    hvsep [ hsep [pp pat , kwd "="]
+          , expr $ nest (2 * em) $ pp rhs
+          ]
     for_ bnds $ \wheres -> do
       newline
       nest (2 * em) $ do
@@ -281,6 +299,7 @@ instance PP Decl where
       newline
       vsep (map pp body)
       where over =
+              map (annotate HPragma) $
               case overlap of
                 Nothing -> []
                 Just Overlap -> [text "{-# OVERLAPPING #-}"]
