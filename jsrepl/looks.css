@@ -25,6 +25,10 @@
     src: url('fonts/LinuxLib/LinLibertine_aS.otf') format('opentype');
 }
 
+#transcript {
+    resize: both;
+    overflow: auto;
+}
 
 body {
     font-family: "Linux Libertine";

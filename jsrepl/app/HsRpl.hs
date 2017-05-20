@@ -60,12 +60,18 @@ import qualified Data.Text as T
 import Language.Haskell.Exts
 
 ---
+import Text.PrettyPrint.Final (newline)
+---
 import Lib
 import PPHaskell
 
 ---
+exts = EnableExtension <$>
+         [ MultiParamTypeClasses
+         , FunctionalDependencies
+         ]
 
-
+theMode = ParseMode "input.hs" Haskell2010 exts False True Nothing True
 
 config :: REPLConfig HsAnn
 config =
@@ -73,14 +79,14 @@ config =
     { handleInput = hI
     , showAnn = show
     }
-  where hI f =
-          case parseFileContents f of
+  where hI i =
+          case parseExpWithMode theMode i of
             ParseFailed loc err -> Left err
             ParseOk ast ->
-              Right $ pp ast
+              Right $ pp ast >> newline
 
 main :: IO ()
-main = jsFile config
+main = jsREPLMulti config
 
 
 

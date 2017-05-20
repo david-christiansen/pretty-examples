@@ -16,10 +16,11 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   ghc-options:         -Wall
-  exposed-modules:     Lib
+  exposed-modules:     Lib, PPHaskell
   build-depends:       base >= 4.7 && < 5
                      , ghcjs-dom == 0.7.0.4
                      , ghcjs-base
+                     , haskell-src-exts == 1.17.1
                      , pretty-monadic-printer
                      , text
                      , mtl
@@ -60,6 +61,22 @@ executable ppupload
                      , containers
   default-language:    Haskell2010
 
+executable pploop
+  hs-source-dirs:      app
+  main-is:             HsRpl.hs
+  ghc-options:         -Wall
+  other-modules:       Lisp
+  build-depends:       base
+                     , ghcjs-base
+                     , haskell-src-exts == 1.17.1
+                     , jsrepl
+                     , mtl
+                     , ghcjs-dom == 0.7.0.4
+                     , pretty-monadic-printer
+                     , text
+                     , transformers
+                     , containers
+  default-language:    Haskell2010
 
 
 -- source-repository head

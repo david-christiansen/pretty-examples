@@ -1,4 +1,3 @@
-
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -9,6 +8,7 @@
 module Lib ( DocM(..)
            , REPLConfig(..)
            , jsREPL
+           , jsREPLMulti
            , jsFile
            ) where
 
@@ -39,6 +39,8 @@ import GHCJS.DOM.File
 import GHCJS.DOM.FileList
 import GHCJS.DOM.FileReader
 import GHCJS.DOM.HTMLInputElement (getFilesUnsafe, getValueUnsafe, setValue, setType)
+import GHCJS.DOM.KeyboardEvent (getShiftKey)
+import qualified GHCJS.DOM.HTMLTextAreaElement as TA (getValueUnsafe, setValue)
 import GHCJS.DOM.Node (appendChild, removeChild)
 import GHCJS.DOM.Types ( Document
                        , FileList(..)
@@ -47,10 +49,14 @@ import GHCJS.DOM.Types ( Document
                        , HTMLInputElement(..)
                        , HTMLDivElement(..)
                        , HTMLBRElement(..)
+                       , HTMLTextAreaElement(..)
                        , HTMLSpanElement(..)
                        , IsDocument
+                       , IsGObject
                        , IsNode
+                       , JSVal
                        , Text
+                       , ToJSString
                        , unsafeCastTo
                        )
 import GHCJS.DOM.Window (alert, resize)
@@ -209,7 +215,8 @@ liftRender act = DocM (lift (lift act))
 data REPLConfig ann =
   REPLConfig
     { handleInput :: String -> Either String (DocM ann ())
-    , showAnn     :: ann -> String}
+    , showAnn     :: ann -> String
+    }
 
 
 jsREPL :: REPLConfig ann -> IO ()
@@ -219,6 +226,7 @@ jsREPL config = do
   Just body   <- getBody doc
 
   transcript <- createElement doc "div" HTMLElement
+  E.setAttribute transcript "id" "transcript"
   input      <- createElement doc "input" HTMLInputElement
   button     <- createElement doc "input" HTMLInputElement
 
@@ -281,6 +289,77 @@ jsREPL config = do
 
   liftIO $ return ()
 
+jsREPLMulti config = do
+  Just doc    <- currentDocument
+  Just window <- currentWindow
+  Just body   <- getBody doc
+
+  transcript <- createElement doc "div" HTMLElement
+  E.setAttribute transcript "id" "transcript"
+  input      <- createElement doc "textarea" HTMLTextAreaElement
+  button     <- createElement doc "input" HTMLInputElement
+
+  setType button "button"
+  setValue button (Just "Go")
+
+  outputRecord <- newIORef [] :: IO (IORef [DocM ann ()])
+
+  appendChild body (Just transcript)
+  appendChild body (Just input)
+  appendChild body (Just button)
+  threadDelay 1
+
+  renderLock <- newMVar ()
+
+  let refreshOut = forkIO $ do
+        ok <- tryTakeMVar renderLock
+        case ok of
+          Just () -> do
+            E.setInnerHTML transcript (Just "")
+            out <- reverse <$> readIORef outputRecord
+            for_ out $ \ d -> do
+              o <- execDoc doc transcript (pure . showAnn config) d
+              render doc transcript (showAnn config) o
+              br <- createElement doc "br" HTMLBRElement
+              appendChild transcript (Just br)
+            putMVar renderLock ()
+          Nothing -> pure ()
+
+  let addOut doc = forkIO $
+        atomicModifyIORef' outputRecord (\ old -> (doc : old, ()))
+
+
+  let save line =
+        case handleInput config line of
+          Left err -> liftIO $ do
+            w <- currentWindow
+            case w of
+              Just win -> liftIO $ alert win err
+              Nothing -> liftIO $ putStrLn err
+          Right doc ->
+            liftIO $ do
+              addOut doc
+              refreshOut
+              TA.setValue input (Just "")
+              return ()
+
+  let userInput = TA.getValueUnsafe input :: EventM e t String
+
+  on button E.click (userInput >>= save)
+  on input E.keyPress $ do
+    wh <- uiWhich
+    shift <- getShiftKey =<< ask
+    if not shift && wh == 13
+      then (userInput >>= save)
+      else return ()
+
+  (Just w) <- currentWindow
+  on w resize $ liftIO (refreshOut *> pure ())
+
+
+  liftIO $ return ()
+
+
 
 jsFile :: REPLConfig ann -> IO ()
 jsFile config = do
@@ -289,6 +368,7 @@ jsFile config = do
   Just body   <- getBody doc
 
   transcript <- createElement doc "div" HTMLElement
+  E.setAttribute transcript "id" "transcript"
   file       <- createElement doc "input" HTMLInputElement
 
   setType file "file"
@@ -359,7 +439,11 @@ jsFile config = do
 
   liftIO $ return ()
 
-
+createElement :: ( IsGObject b
+                 , IsDocument self
+                 , ToJSString tagName
+                 , MonadIO m) =>
+                 self -> tagName -> (JSVal -> b) -> m b
 createElement doc tagName tagType =
   createElementUnsafe doc (Just tagName) >>= unsafeCastTo tagType
 
