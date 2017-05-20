@@ -95,8 +95,8 @@ renderAtom htmlDoc (AChunk (CSpace w)) = do
   elt <- createElement htmlDoc "span" HTMLElement
   E.setAttribute elt "style" $
     "display: inline-block;" ++
-    "min-width: " ++ show (round w) ++ "px;" ++
-    "max-width: " ++ show (round w) ++ "px;"
+    "min-width: " ++ show w ++ "px;" ++
+    "max-width: " ++ show w ++ "px;"
   txt <- createTextNodeUnsafe' htmlDoc " "
   appendChild elt (Just txt)
   return elt

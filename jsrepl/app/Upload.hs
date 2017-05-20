@@ -65,6 +65,33 @@ import Text.PrettyPrint.Final
 
 ---
 
+padCenter :: (MonadPretty w ann fmt m, Fractional w) => T.Text -> T.Text -> m ()
+padCenter bigger smaller = do
+  w  <- measureText bigger
+  w' <- measureText smaller
+  let padding = max 0 (w - w') / 2
+  space padding
+  text smaller
+  space padding
+
+padLeft :: (MonadPretty w ann fmt m, Fractional w) => T.Text -> T.Text -> m ()
+padLeft bigger smaller = do
+  w  <- measureText bigger
+  w' <- measureText smaller
+  let padding = max 0 (w - w')
+  text smaller
+  space padding
+
+padRight :: (MonadPretty w ann fmt m, Fractional w) => T.Text -> T.Text -> m ()
+padRight bigger smaller = do
+  w  <- measureText bigger
+  w' <- measureText smaller
+  let padding = max 0 (w - w')
+  space padding
+  text smaller
+  
+---
+
 data HsAnn = HKeyword
            | HModuleName
            | HPragma
@@ -73,13 +100,14 @@ data HsAnn = HKeyword
            | HCon
            | HKind
            | HVar
+           | HConstraint
            | TODO
   deriving Show
 
 kwd = annotate HKeyword . kwd'
   where kwd' "->" = rightArrow
         kwd' "<-" = leftArrow
-        kwd' "::" = ann
+        -- kwd' "::" = ann
         kwd' "forall" = forAll
         kwd' "=>" = fatRightArrow
         kwd' "\\" = lambda
@@ -98,14 +126,15 @@ processName "=<<" = "=≪"
 processName "++" = "⧺"
 processName "." = "∘"
 processName xs = swapChar <$> xs
-  where swapChar '\'' = '′'
+  where swapChar '\'' = '′' -- PRIME
+        swapChar '*' = '∗' -- ASTERISK OPERATOR
         swapChar x = x
 
 
 rightArrow = text "→"
 fatRightArrow = text "⇒"
 leftArrow = text "←"
-ann = text "∷"
+--ann = text "∷"
 forAll = text "∀"
 lambda = text "λ"
 
@@ -257,7 +286,13 @@ instance PP Decl where
       (if isEmpty ctx then [] else map pp ctx ++ [kwd "=>"]) ++
       [annotate HTyCon $ pp n] ++
       map (annotate HTyVar . pp) tyvars
-    align $ collection (kwd "=") (return ()) (kwd "|") (map pp ctors)
+    space i
+    align $ do
+      kwd "="
+      space i
+      let sep = annotate HKeyword $ padCenter  "=" "|"
+      sequence_ (intersperse (ifFlat (space i) newline >> sep >> space i)
+                             (map (expr . pp) ctors))
     if isEmpty derives
       then pure ()
       else nest (2 * em) $ do
@@ -270,15 +305,11 @@ instance PP Decl where
     hvsep [ hsep [pp pat , kwd "="]
           , expr $ nest (2 * em) $ pp rhs
           ]
-    for_ bnds $ \wheres -> do
-      newline
-      nest (2 * em) $ do
-        kwd "where" >> newline
-        pp wheres
+    for_ bnds whereBlock
   pp (FunBind xs) = vsep (map pp xs)
   pp (TypeDecl loc name args rhs) =
     hsep [ kwd "type"
-         , pp name
+         , annotate HTyCon $ pp name
          , grouped $ hvsep (map pp args)
          , kwd "="
          , pp rhs
@@ -291,7 +322,7 @@ instance PP Decl where
            (if isEmpty ctx
               then []
               else [hsep [hsep (map pp ctx), kwd "=>"]]) ++
-           [ pp n
+           [ annotate HConstraint $ pp n
            , hsep (map pp args)
            , kwd "where"
            ]
@@ -310,20 +341,21 @@ instance PP Decl where
     i <- spaceWidth
     kwd "class"
     space i
-    if isEmpty ctx
-      then return ()
-      else
-        align $
-          collection (kwd "(") (kwd ")" >> space i >> kwd "=>") (kwd ",") $
-          map pp ctx
-
-    pp n
-    space i
-    align $ grouped $ hvsep $ map pp args
-    align $ grouped $ hvsep $ map pp fundeps
-
-    if isEmpty fundeps then return () else space i
-    kwd "where"
+    expr $
+      hvsep $ (if isEmpty ctx
+                 then []
+                 else
+                  [ align $
+                      collection (kwd "(") (kwd ")" >> space i >> kwd "=>") (kwd ",") $
+                        map pp ctx
+                  ]) ++
+              [ expr $ hvsep [ hsep [ annotate HConstraint $ pp n
+                                    , align $ grouped $ hvsep $ map pp args
+                                    ]
+                             , expr $ hvsep $ map pp fundeps
+                             , kwd "where"
+                             ]
+              ]
     nest (2 * em) $ do
       newline
       vsep (map pp body)
@@ -332,8 +364,8 @@ instance PP Decl where
 instance PP FunDep where
   pp (FunDep ls rs) = do
     hsep [ kwd "|"
-         , align $ grouped $ hvsep [ hsep $ (map pp ls) ++ [kwd "->"]
-                                   , hsep (map pp rs)
+         , align $ grouped $ hvsep [ hsep $ (map (annotate HTyVar . pp) ls) ++ [kwd "->"]
+                                   , hsep (map (annotate HTyVar . pp) rs)
                                    ]
          ]
 
@@ -353,18 +385,24 @@ instance PP InstDecl where
           ]
   pp x = todo x
 
+whereBlock contents = do
+  em <- emWidth
+  nest em $ do
+    newline
+    nest em $ do
+      kwd "where" >> newline
+      pp contents
+
+
 instance PP Match where
   pp (Match loc n pats ty rhs bnds) = do
     em <- emWidth
-    hsep [ grouped $ hvsep $ [annotate HVar $ pp n] ++ map pp pats
-         , kwd "="
-         , pp rhs]
-    for_ bnds $ \wheres -> do
-      newline
-      nest (2 * em) $ do
-        kwd "where" >> newline
-        pp wheres
-
+    nest (2 * em) $
+      hvsep [ hsep [grouped $ hvsep $ [annotate HVar $ pp n] ++ map pp pats
+                   , kwd "="
+                   ]
+            , expr $ pp rhs]
+    for_ bnds whereBlock
 
 instance PP Binds where
   pp (BDecls decls) = vsep (map pp decls)
@@ -372,7 +410,7 @@ instance PP Binds where
 
 ppDerive (n, args) = do
   i <- spaceWidth
-  pp n
+  annotate HConstraint $ pp n
   for_ args $ \a -> space i >> pp a
 
 instance PP QualConDecl where
@@ -399,14 +437,15 @@ instance PP ConDecl where
                     , grouped (pp t2)
                     ]
   pp (RecDecl n fields) = do
-    annotate HCon (pp n)
-    align $ collection (text "{") (text "}") (text ",")  $
-      [ hsep [ collection (return ()) (return ()) (text ",") (map pp ns)
-             , kwd "::"
-             , pp t
-             ]
-      | (ns, t) <- fields
-      ]
+    hsep [ annotate HCon (pp n)
+         , expr $ alwaysBraces $
+           [ hsep [ collection (return ()) (return ()) (text ",") (map pp ns)
+                  , kwd "::"
+                  , pp t
+                  ]
+           | (ns, t) <- fields
+           ]
+         ]
 
 instance PP Kind where
   pp k = annotate HKind $ pp' k
@@ -435,18 +474,18 @@ instance PP TyVarBind where
   pp (KindedVar n k) = grouped $ do
     i <- spaceWidth
     text "("
-    pp n
+    annotate HTyVar $ pp n
     space i
     kwd "::"
     space i
     pp k
     text ")"
-  pp (UnkindedVar n) = pp n
+  pp (UnkindedVar n) = annotate HTyVar $ pp n
 
 instance PP Asst where
   pp (ClassA n tys) = do
     i <- spaceWidth
-    pp n
+    annotate HConstraint $ pp n
     for_ tys $ \t -> space i >> pp t
   pp (ParenA a) = do
     text "("
@@ -485,13 +524,19 @@ instance PP Pat where
          ]
   pp (PatTypeSig loc p t) = do
     i <- spaceWidth
-    grouped $ hvsep [pp p, nest (2 * i) $ pp t]
+    expr $ hvsep [hsep [pp p, kwd "::"], nest (2 * i) $ pp t]
   pp x = todo x
 
-perhapsBraces docs = do
-  em <- emWidth
+perhapsBraces docs =
   ifFlat (collection (text "{") (text "}") (text ";") docs)
          (align (vsep docs))
+
+alwaysBraces docs = do
+  i <- spaceWidth
+  expr $  collection (text "{")
+                     (text "}")
+                     (text ",")
+                     docs
 
 instance PP Exp where
   pp (Var n) = annotate HVar $ pp n
@@ -502,7 +547,7 @@ instance PP Exp where
     grouped $ align $ nest em $ hvsep [hsep [pp e1, pp op], pp e2]
   pp (App e1 e2) = do
     i <- spaceWidth
-    grouped $ nest i $ hvsep [pp e1, pp e2]
+    expr $ nest i $ hvsep [pp e1, pp e2]
   pp (NegApp e) = text "-" >> pp e
   pp (Lambda loc pats body) = do
     kwd "\\"
@@ -561,11 +606,11 @@ instance PP Exp where
     parens $ hvsep [pp op, pp e]
   pp (RecConstr n fields) =
     hsep [ annotate HCon $ pp n
-         , align $ collection (text "{") (text "}") (text ",") (map pp fields)
+         , alwaysBraces $ map pp fields
          ]
   pp (RecUpdate e fields) =
     hsep [ pp e
-         , align $ collection (text "{") (text "}") (text ",") (map pp fields)
+         , alwaysBraces $ map pp fields
          ]
   pp e = todo e
 
@@ -575,10 +620,7 @@ instance PP Alt where
          , kwd "->"
          , align $ grouped $ pp rhs]
     em <- emWidth
-    for_ bnds $ \bs ->
-      nest em $ do
-        kwd "where"
-        nest em $ pp bs
+    for_ bnds whereBlock
 
 instance PP FieldUpdate where
   pp (FieldUpdate n e) = hsep [pp n, kwd "=", align $ pp e]
@@ -621,19 +663,26 @@ instance PP Type where
         hsep (map pp bs)
         kwd "."
     case ctx of
-      [] -> pure ()
+      [] -> expr $ pp ty
+      [t] -> hvsep [ hsep [ expr $ pp t
+                         , kwd "=>"
+                         ]
+                   , expr $ pp ty
+                   ]
       _  -> do
-        hsep [ align $ grouped $ hvsep (map pp ctx)
-             , kwd "=>"
-             , return () -- to get another space
-             ]
-    pp ty
+        expr $ hvsep [ align $ grouped $
+                       hsep [ collection (text "(") (text ")") (text ",") (map pp ctx)
+                            , kwd "=>"
+                            ]
+                     , expr $ pp ty
+                     ]
   pp (TyParen t) = parens (pp t)
-  pp (TyFun t1 t2) = grouped $
-    hvsep [ pp t1
-          , annotate HTyCon rightArrow
-          , pp t2
-          ]
+  pp t@(TyFun _ _) = do
+    i <- spaceWidth
+    expr $ sequence_ $ intersperse (space i >> arr >> ifFlat (space i) newline) (map pp $ unFun t)
+    where unFun (TyFun a b) = a : unFun b
+          unFun other = [other]
+          arr = annotate HTyCon rightArrow
   pp (TyList t) = grouped $ do
     annotate HTyCon $ text "["
     pp t

@@ -82,6 +82,13 @@ span.LKwd {
     font-family: "Inconsolata", monospace;
 }
 
+.HConstraint {
+    font-family: "Linux Biolinum";
+    color: darkblue;
+}
+
+
+
 .TODO {
     color: red;
     font-family: monospace;
