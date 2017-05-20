@@ -61,9 +61,18 @@ import Language.Haskell.Exts
 
 ---
 import Lib
-import Text.PrettyPrint.Final
+import Text.PrettyPrint.Final hiding (collection)
+import qualified Text.PrettyPrint.Final as Final
 
 ---
+
+hcollection open close sep docs = do
+  wo <- measureText open
+  wc <- measureText close
+  ws <- measureText sep
+  let w = max (max wo wc) ws
+  let sp x = space $ max 0 (w - x)
+  Final.collection (text open *> sp wo) (text close *> sp wc) (text sep *> sp ws) docs
 
 padCenter :: (MonadPretty w ann fmt m, Fractional w) => T.Text -> T.Text -> m ()
 padCenter bigger smaller = do
@@ -203,7 +212,7 @@ instance PP ImportDecl where
       Nothing -> pure ()
       Just (hidep, imports) -> do
         if hidep then kwd "hiding" >> space i else pure ()
-        collection (text "(") (text ")") (text ",") $
+        hcollection "(" ")" "," $
           map pp imports
     for_ asMod $ \n -> do
       space i
@@ -217,7 +226,7 @@ instance PP ImportSpec where
   pp (IThingAll n) = pp n >> text "(..)"
   pp (IThingWith n cs) = do
     pp n
-    collection (text "(") (text ")") (text ",") $
+    hcollection "(" ")" "," $
       map pp cs
 
 instance PP CName where
@@ -264,16 +273,21 @@ instance PP Module where
            case exports of
              Nothing -> pure ()
              Just es -> grouped $ do
-               align $ collection (text "(") (text ")") (text ",") (map pp es)
+               align $ hcollection "(" ")" "," (map pp es)
 
 instance PP DataOrNew where
   pp DataType = kwd "data"
   pp NewType = kwd "newtype"
 
 instance PP Decl where
+  pp (TypeSig loc [n] ty) = do
+    hsep [ annotate HVar $ pp n
+         , kwd "::"
+         , align $ grouped $ pp ty
+         ]
   pp (TypeSig loc ns ty) = do
     i <- spaceWidth
-    collection (return ()) (return ()) (text ",") (map (annotate HVar . pp) ns)
+    hcollection ""  "" "," $ map (annotate HVar . pp) ns
     space i
     kwd "::"
     space i
@@ -299,7 +313,7 @@ instance PP Decl where
         newline
         kwd "deriving"
         space i
-        collection (text "(") (text ")") (text ",") (map ppDerive derives)
+        hcollection "(" ")" "," $ map ppDerive derives
   pp (PatBind loc pat rhs bnds) = do
     em <- emWidth
     hvsep [ hsep [pp pat , kwd "="]
@@ -346,7 +360,7 @@ instance PP Decl where
                  then []
                  else
                   [ align $
-                      collection (kwd "(") (kwd ")" >> space i >> kwd "=>") (kwd ",") $
+                      Final.collection (kwd "(") (kwd ")" >> space i >> kwd "=>") (annotate HKeyword $ padRight "(" ",") $
                         map pp ctx
                   ]) ++
               [ expr $ hvsep [ hsep [ annotate HConstraint $ pp n
@@ -439,7 +453,7 @@ instance PP ConDecl where
   pp (RecDecl n fields) = do
     hsep [ annotate HCon (pp n)
          , expr $ alwaysBraces $
-           [ hsep [ collection (return ()) (return ()) (text ",") (map pp ns)
+           [ hsep [ Final.collection (return ()) (return ()) (text ",") (map pp ns)
                   , kwd "::"
                   , pp t
                   ]
@@ -468,7 +482,7 @@ instance PP Kind where
             space i
             pp' k2
           pp' (KindTuple ks) =
-            collection (text "(") (text ")") (text ",") (map pp' ks)
+            hcollection "(" ")" "," $ map pp' ks
 
 instance PP TyVarBind where
   pp (KindedVar n k) = grouped $ do
@@ -514,12 +528,12 @@ instance PP Pat where
   pp (PVar n) = annotate HVar $ pp n
   pp PWildCard = text "_"
   pp (PList ps) =
-    collection (annotate HCon (text "[")) (annotate HCon (text "]")) (annotate HCon (text ",")) (map pp ps)
+    Final.collection (annotate HCon (text "[")) (annotate HCon (text "]")) (annotate HCon (text ",")) (map pp ps)
   pp (PParen p) = parens (pp p)
   pp (PInfixApp p1 op p2) =
     grouped $ hvsep [hsep [pp p1, pp op], pp p2]
   pp (PApp p1 p2s) =
-    hsep [ pp p1
+    hsep [ annotate HCon $ pp p1
          , align $ grouped $ hvsep (map pp p2s)
          ]
   pp (PatTypeSig loc p t) = do
@@ -528,15 +542,12 @@ instance PP Pat where
   pp x = todo x
 
 perhapsBraces docs =
-  ifFlat (collection (text "{") (text "}") (text ";") docs)
+  ifFlat (hcollection "{" "}" ";" $ docs)
          (align (vsep docs))
 
 alwaysBraces docs = do
   i <- spaceWidth
-  expr $  collection (text "{")
-                     (text "}")
-                     (text ",")
-                     docs
+  expr $ hcollection "{" "}" "," docs
 
 instance PP Exp where
   pp (Var n) = annotate HVar $ pp n
@@ -587,17 +598,17 @@ instance PP Exp where
     kwd "mdo"
     perhapsBraces (map pp stmts)
   pp (Tuple Boxed es) =
-    collection (annotate HCon $ text "(") (annotate HCon $ text ")") (annotate HCon $ text ",") (map pp es)
+    Final.collection (annotate HCon $ text "(") (annotate HCon $ text ")") (annotate HCon $ text ",") (map pp es)
   pp (Tuple Unboxed es) =
-    collection (annotate HCon $ text "(#") (annotate HCon $ text "#)") (annotate HCon $ text ",") (map pp es)
+    Final.collection (annotate HCon $ text "(#") (annotate HCon $ text "#)") (annotate HCon $ text ",") (map pp es)
   pp (TupleSection Boxed es) =
-    collection (annotate HCon $ text "(") (annotate HCon $ text ")") (annotate HCon $ text ",") (map (maybe (pure ()) pp) es)
+    Final.collection (annotate HCon $ text "(") (annotate HCon $ text ")") (annotate HCon $ text ",") (map (maybe (pure ()) pp) es)
   pp (TupleSection Unboxed es) =
-    collection (annotate HCon $ text "(#") (annotate HCon $ text "#)") (annotate HCon $ text ",") (map (maybe (pure ()) pp) es)
+    Final.collection (annotate HCon $ text "(#") (annotate HCon $ text "#)") (annotate HCon $ text ",") (map (maybe (pure ()) pp) es)
   pp (List es) =
-    collection (annotate HCon $ text "[") (annotate HCon $ text "]") (annotate HCon $ text ",") (map pp es)
+    Final.collection (annotate HCon $ text "[") (annotate HCon $ text "]") (annotate HCon $ text ",") (map pp es)
   pp (ParArray es) =
-    collection (annotate HCon $ text "[:") (annotate HCon $ text ":]") (annotate HCon $ text ",") (map pp es)
+    Final.collection (annotate HCon $ text "[:") (annotate HCon $ text ":]") (annotate HCon $ text ",") (map pp es)
   pp (Paren e) = do
     parens $ pp e
   pp (LeftSection e op) =
@@ -671,7 +682,7 @@ instance PP Type where
                    ]
       _  -> do
         expr $ hvsep [ align $ grouped $
-                       hsep [ collection (text "(") (text ")") (text ",") (map pp ctx)
+                       hsep [ hcollection "(" ")" "," (map pp ctx)
                             , kwd "=>"
                             ]
                      , expr $ pp ty
@@ -692,12 +703,12 @@ instance PP Type where
   pp (TyApp t1 t2) =
     hsep [pp t1, pp t2]
   pp (TyTuple Boxed ts) =
-    collection (annotate HTyCon $ text "(")
+    Final.collection (annotate HTyCon $ text "(")
                (annotate HTyCon $ text ")")
                (annotate HTyCon $ text ",")
                (map pp ts)
   pp (TyTuple Unboxed ts) =
-    collection (annotate HTyCon $ text "(#")
+    Final.collection (annotate HTyCon $ text "(#")
                (annotate HTyCon $ text "#)")
                (annotate HTyCon $ text ",")
                (map pp ts)
