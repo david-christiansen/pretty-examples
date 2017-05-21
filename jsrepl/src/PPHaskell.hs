@@ -70,6 +70,8 @@ data HsAnn = HKeyword
            | HKind
            | HVar
            | HConstraint
+           | HLit
+           | HInfixOp
            | TODO
   deriving Show
 
@@ -94,6 +96,7 @@ processName ">>" = "≫"
 processName "=<<" = "=≪"
 processName "++" = "⧺"
 processName "." = "∘"
+processName "<>" = "⋄"
 processName xs = swapChar <$> xs
   where swapChar '\'' = '′' -- PRIME
         swapChar '*' = '∗' -- ASTERISK OPERATOR
@@ -239,9 +242,12 @@ instance PP DataOrNew where
   pp DataType = kwd "data"
   pp NewType = kwd "newtype"
 
+
 instance PP Decl where
   pp (TypeSig loc [n] ty) = do
-    hsep [ annotate HVar $ pp n
+    hsep [ case n of
+             Symbol x -> parens $ annotate HInfixOp $ annotate HVar $ pp n
+             _ -> annotate HVar $ pp n
          , kwd "::"
          , align $ grouped $ pp ty
          ]
@@ -276,9 +282,10 @@ instance PP Decl where
         hcollection "(" ")" "," $ map ppDerive derives
   pp (PatBind loc pat rhs bnds) = do
     em <- emWidth
-    hvsep [ hsep [pp pat , kwd "="]
-          , expr $ nest (2 * em) $ pp rhs
-          ]
+    nest (2 * em) $
+      hvsep [ hsep [pp pat , kwd "="]
+            , expr $ pp rhs
+            ]
     for_ bnds whereBlock
   pp (FunBind xs) = vsep (map pp xs)
   pp (TypeDecl loc name args rhs) =
@@ -323,25 +330,35 @@ instance PP Decl where
                       Final.collection (kwd "(") (kwd ")" >> space i >> kwd "=>") (annotate HKeyword $ padRight "(" ",") $
                         map pp ctx
                   ]) ++
-              [ expr $ hvsep [ hsep [ annotate HConstraint $ pp n
-                                    , align $ grouped $ hvsep $ map pp args
-                                    ]
-                             , expr $ hvsep $ map pp fundeps
-                             , kwd "where"
-                             ]
+              [ expr $ hvsep $ (hsep [ annotate HConstraint $ pp n
+                                     , align $ grouped $ hvsep $ map pp args
+                                     ]) :
+                               ((if fundeps == [] then [] else [expr $ deps $ map pp fundeps]) ++
+                               [kwd "where"])
               ]
     nest (2 * em) $ do
       newline
       vsep (map pp body)
+    where
+      depOne d = do
+        i <- spaceWidth
+        annotate HKeyword $ padCenter "," "|"
+        space i
+        d
+      depMore d = do
+        i <- spaceWidth
+        annotate HKeyword $ padCenter "|" ","
+        space i
+        d
+      deps [] = return ()
+      deps (x:xs) = hvsepTight $ depOne x : map depMore xs
   pp d = todo d
 
 instance PP FunDep where
   pp (FunDep ls rs) = do
-    hsep [ kwd "|"
-         , align $ grouped $ hvsep [ hsep $ (map (annotate HTyVar . pp) ls) ++ [kwd "->"]
-                                   , hsep (map (annotate HTyVar . pp) rs)
-                                   ]
-         ]
+    align $ grouped $ hvsep [ hsep $ (map (annotate HTyVar . pp) ls) ++ [kwd "->"]
+                            , hsep (map (annotate HTyVar . pp) rs)
+                            ]
 
 instance PP ClassDecl where
   pp (ClsDecl d) = pp d
@@ -369,6 +386,19 @@ whereBlock contents = do
 
 
 instance PP Match where
+
+  pp (Match loc n@(Symbol _) (p1:p2:pats) ty rhs bnds) = do
+    em <- emWidth
+    nest (2 * em) $
+      hvsep [ hsep [grouped $ hvsep $
+                      (paren $ hvsep [pp p1, annotate HVar $ pp n, pp p2]) : map pp pats
+                   , kwd "="
+                   ]
+            , expr $ pp rhs]
+    for_ bnds whereBlock
+    where paren = case pats of
+            [] -> expr
+            ps -> \x -> expr (text "(" >> x >> text ")")
   pp (Match loc n pats ty rhs bnds) = do
     em <- emWidth
     nest (2 * em) $
@@ -377,6 +407,7 @@ instance PP Match where
                    ]
             , expr $ pp rhs]
     for_ bnds whereBlock
+
 
 instance PP Binds where
   pp (BDecls decls) = vsep (map pp decls)
@@ -534,10 +565,11 @@ instance PP Exp where
                     , pp body
                     ]
   pp (If e1 e2 e3) = do
-    grouped $ hvsep [ hsep [kwd "if", pp e1]
-                    , hsep [kwd "then", pp e2]
-                    , hsep [kwd "else", pp e3]
-                    ]
+    ifw <- annotate HKeyword $ measureText "if"
+    grouped $ nest ifw $ hvsep [ hsep [kwd "if", pp e1]
+                               , hsep [kwd "then", pp e2]
+                               , hsep [kwd "else", pp e3]
+                               ]
   pp (MultiIf alts) = do
     hsep [kwd "if", align $ vsep $ map pp alts]
   pp (Case e alts) = do
@@ -613,11 +645,12 @@ instance PP Stmt where
   pp x = todo x
 
 instance PP Literal where
-  pp (Char c) = text (T.pack (show c)) -- TODO escape
-  pp (String s) = text (T.pack (show s)) -- TODO escape
-  pp (Int i) = text (T.pack (show i))
-  pp (Frac r) = text (T.pack (show r))
-  pp x = todo x
+  pp = annotate HLit . pp'
+    where pp' (Char c) = text (T.pack (show c)) -- TODO escape
+          pp' (String s) = text (T.pack (show s)) -- TODO escape
+          pp' (Int i) = text (T.pack (show i))
+          pp' (Frac r) = text (T.pack (show r))
+          pp' x = todo x
 
 instance PP QOp where
   pp (QVarOp n) = pp n

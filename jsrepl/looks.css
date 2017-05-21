@@ -91,7 +91,14 @@ span.LKwd {
     color: darkblue;
 }
 
+.HLit {
+    font-family: "Inconsolata", monospace;
+    color: darkred;
+}
 
+.HInfixOp .HVar {
+    font-style: normal;
+}
 
 .TODO {
     color: red;
