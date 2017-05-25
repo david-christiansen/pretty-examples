@@ -34,6 +34,18 @@ hcollection open close sep docs = do
   let sp x = space $ max 0 (w - x)
   Final.collection (text open *> sp wo) (text close *> sp wc) (text sep *> sp ws) docs
 
+hcollectionWide open close sep docs = do
+  wo <- measureText open
+  wc <- measureText close
+  ws <- measureText sep
+  let w = max (max wo wc) ws
+  let sp x = space $ max 0 (w - x)
+  Final.collection (text open *> sp wo *> flatSpace) (flatSpace *> text close *> sp wc) (text sep *> sp ws) docs
+  where
+    flatSpace = do
+      i <- spaceWidth
+      ifFlat (space i) (return ())
+
 padCenter :: (MonadPretty w ann fmt m, Fractional w) => T.Text -> T.Text -> m ()
 padCenter bigger smaller = do
   w  <- measureText bigger
@@ -288,13 +300,16 @@ instance PP Decl where
             ]
     for_ bnds whereBlock
   pp (FunBind xs) = vsep (map pp xs)
-  pp (TypeDecl loc name args rhs) =
-    hsep [ kwd "type"
-         , annotate HTyCon $ pp name
-         , grouped $ hvsep (map pp args)
-         , kwd "="
-         , pp rhs
-         ]
+  pp (TypeDecl loc name args rhs) = do
+    em <- emWidth
+    nest (2 * em) $
+      hvsep [ hsep [ kwd "type"
+                   , annotate HTyCon $ pp name
+                   , grouped $ hvsep (map pp args)
+                   , kwd "="
+                   ]
+            , expr $ pp rhs
+            ]
   pp (InstDecl loc overlap tyvars ctx n args body) = do
     em <- emWidth
     hsep $ [kwd "instance"] ++
@@ -443,7 +458,7 @@ instance PP ConDecl where
                     ]
   pp (RecDecl n fields) = do
     hsep [ annotate HCon (pp n)
-         , expr $ alwaysBraces $
+         , expr $ alwaysBraces' $
            [ hsep [ Final.collection (return ()) (return ()) (text ",") (map pp ns)
                   , kwd "::"
                   , pp t
@@ -536,9 +551,12 @@ perhapsBraces docs =
   ifFlat (hcollection "{" "}" ";" $ docs)
          (align (vsep docs))
 
-alwaysBraces docs = do
-  i <- spaceWidth
+alwaysBraces docs =
   expr $ hcollection "{" "}" "," docs
+
+alwaysBraces' docs =
+  expr $ hcollectionWide "{" "}" "," docs
+
 
 instance PP Exp where
   pp (Var n) = annotate HVar $ pp n
@@ -609,11 +627,11 @@ instance PP Exp where
     parens $ hvsep [pp op, pp e]
   pp (RecConstr n fields) =
     hsep [ annotate HCon $ pp n
-         , alwaysBraces $ map pp fields
+         , alwaysBraces' $ map pp fields
          ]
   pp (RecUpdate e fields) =
     hsep [ pp e
-         , alwaysBraces $ map pp fields
+         , alwaysBraces' $ map pp fields
          ]
   pp e = todo e
 
@@ -693,8 +711,9 @@ instance PP Type where
     annotate HTyCon $ text "]"
   pp (TyCon n) = annotate HTyCon $ pp n
   pp (TyVar n) = annotate HTyVar $ pp n
-  pp (TyApp t1 t2) =
-    hsep [pp t1, pp t2]
+  pp (TyApp t1 t2) = do
+    em <- emWidth
+    expr $ nest em $ hvsep [pp t1, pp t2]
   pp (TyTuple Boxed ts) =
     Final.collection (annotate HTyCon $ text "(")
                (annotate HTyCon $ text ")")

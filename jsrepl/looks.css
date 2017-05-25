@@ -100,6 +100,11 @@ span.LKwd {
     font-style: normal;
 }
 
+.HCon .HTyCon {
+    color: darkred;
+}
+
+
 .TODO {
     color: red;
     font-family: monospace;
