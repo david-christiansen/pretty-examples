@@ -1,7 +1,7 @@
 name:                jsrepl
 version:             0.1.0.0
 synopsis:            A simple GHCJS-based REPL demo
-description:         A demonstration of the monadic pretty printer
+description:         A demonstration of the Final Pretty Printer
 homepage:            none
 license:             MIT
 license-file:        LICENSE
@@ -21,7 +21,7 @@ library
                      , ghcjs-dom == 0.7.0.4
                      , ghcjs-base
                      , haskell-src-exts == 1.17.1
-                     , pretty-monadic-printer
+                     , final-pretty-printer >= 0.1
                      , text
                      , mtl
                      , transformers
@@ -38,7 +38,7 @@ executable jsrepl
                      , jsrepl
                      , mtl
                      , ghcjs-dom == 0.7.0.4
-                     , pretty-monadic-printer
+                     , final-pretty-printer >= 0.1
                      , text
                      , transformers
                      , containers
@@ -55,7 +55,7 @@ executable ppupload
                      , jsrepl
                      , mtl
                      , ghcjs-dom == 0.7.0.4
-                     , pretty-monadic-printer
+                     , final-pretty-printer >= 0.1
                      , text
                      , transformers
                      , containers
@@ -72,7 +72,24 @@ executable pploop
                      , jsrepl
                      , mtl
                      , ghcjs-dom == 0.7.0.4
-                     , pretty-monadic-printer
+                     , final-pretty-printer >= 0.1
+                     , text
+                     , transformers
+                     , containers
+  default-language:    Haskell2010
+
+executable laws
+  hs-source-dirs:      app
+  main-is:             Laws.hs
+  ghc-options:         -Wall
+  other-modules:       Lisp
+  build-depends:       base
+                     , ghcjs-base
+                     , haskell-src-exts == 1.17.1
+                     , jsrepl
+                     , mtl
+                     , ghcjs-dom == 0.7.0.4
+                     , final-pretty-printer >= 0.1
                      , text
                      , transformers
                      , containers
